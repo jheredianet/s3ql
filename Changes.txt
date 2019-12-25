@@ -1,3 +1,84 @@
+UNRELEASED, S3QL HEAD
+
+  * There have been significant changes in the internal implementation. Asynchronous I/O
+    is now used in favor of threads in many places, and libfuse 3.x is used instead of
+    libfuse 2.x.
+
+  * S3QL is now uses kernel-side writeback caching, which should significantly improve
+    write performance for small block sizes.
+
+  * The dependency on the llfuse Python module has been dropped. A dependency on the `trio
+    <https://github.com/python-trio/trio`_ and `pyfuse3
+    <https://github.com/libfuse/pyfuse3/>`_ modules has been added instead.
+
+
+2019-10-20, S3QL 3.3.2
+
+  * Fixed occasional crashes with "KeyError" when using Google Storage
+    backend.
+
+  * Switched to semantic versioning. An increase in the major (first) version number will
+    indicate a backwards incompatible change (eg a change in the file system revision), a
+    change in the minor version (the second element) indicates new features, and a change
+    in the third element indicates bugfixes.
+
+2019-09-08, S3QL 3.3
+
+  * Added support for Keystone V3 authentication.
+
+2019-07-17, S3QL 3.2
+
+  * Added a `--compress` option to `fsck.s3ql`.
+
+  * Minor improvements/fixes to `contrib/benchmark.py`.
+
+  * Added support for INTELLIGENT_TIERING storage class to the S3
+    backend.
+
+2019-03-31, S3QL 3.1
+
+  * Added a new `--fs-name` option to `mount.s3ql` allowing users
+    to specify a name for the fuse mount (This name is visible
+    in the first column of the system `mount` command output).
+
+  * Added support for "Onezone-IA" to the S3 backend.
+
+  * The `s3ql_oauth_client` command is working again now (it was
+    broken due to changes in Google's OAuth2 workflow).
+
+  * Fixed refresh of Google Storage authentication tokens (expired
+    tokens were resulting in crashes).
+
+2019-02-09, S3QL 3.0
+
+  * Added a new `--systemd` option to simplify running mount.s3ql
+    as a systemd unit.
+
+  * Dropped the `--upstart` option - upstart seems to be unused and
+    unmaintained.
+
+  * Dropped support for legacy ("API key") authentication for Google
+    Storage. Only oauth2 is supported now. This was necessitated by
+    the switch to Google's native API (before S3QL was using Google's
+    S3 compatibility layer).
+
+  * Command line options specified in the authinfo file (in particular
+    --backend-options) are now parsed correctly.
+
+  * S3QL now uses python-cryptography instead of the (no longer
+    maintained) pycrypto module.
+
+  * The Google Storage backend now supports Application Default
+    Credentials (ADC). To use this, install the google.auth module
+    and use ``adc`` as your backend login.
+
+  * `umount.s3ql` now works correctly on systems where `ps` doesn't
+    accept a `-p` option (as long as /proc is available).
+
+2018-12-28, S3QL 2.33
+
+  * Fixed a sporadic test failure in t5_cache.py.
+
 2018-11-06, S3QL 2.32
 
   * Fixed a potential bug in s3qlrm that would probably lead to a

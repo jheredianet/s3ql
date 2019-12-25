@@ -11,12 +11,6 @@ initialize logging and adjust the load path before running
 any tests.
 '''
 
-# Python version check
-import sys
-if sys.version_info < (3,3):
-    raise SystemExit('Python version is %d.%d.%d, but S3QL requires Python 3.3 or newer'
-                     % sys.version_info[:3])
-
 import logging.handlers
 import sys
 import os.path
@@ -25,6 +19,10 @@ import faulthandler
 import signal
 import gc
 import time
+import pytest_trio
+
+
+assert pytest_trio  # suppress unused import warning
 
 # If a test fails, wait a moment before retrieving the captured
 # stdout/stderr. When using a server process (like in t4_fuse.py), this makes
@@ -45,11 +43,11 @@ def s3ql_cmd_argv(request):
     '''Provide argument list to execute s3ql commands in tests'''
 
     if request.config.getoption('installed'):
-        request.cls.s3ql_cmd_argv = lambda self, cmd: [ cmd ]
+        yield lambda cmd: [ cmd ]
     else:
         basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        request.cls.s3ql_cmd_argv = lambda self, cmd: [ sys.executable,
-                                                        os.path.join(basedir, 'bin', cmd) ]
+        yield lambda cmd: [ sys.executable,
+                            os.path.join(basedir, 'bin', cmd) ]
 
 # Enable output checks
 pytest_plugins = ('pytest_checklogs',)
@@ -58,6 +56,11 @@ pytest_plugins = ('pytest_checklogs',)
 def pass_reg_output(request, reg_output):
     '''Provide reg_output function to UnitTest instances'''
     request.instance.reg_output = reg_output
+
+@pytest.fixture()
+def pass_s3ql_cmd_argv(request, s3ql_cmd_argv):
+    '''Provide s3ql_cmd_argv function to UnitTest instances'''
+    request.instance.s3ql_cmd_argv = s3ql_cmd_argv
 
 def pytest_addoption(parser):
     group = parser.getgroup("terminal reporting")

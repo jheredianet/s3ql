@@ -8,23 +8,19 @@ Copyright © 2008 Nikolaus Rath <Nikolaus@rath.org>
 This work can be distributed under the terms of the GNU GPLv3.
 '''
 
-# Python version check
-import sys
-if sys.version_info < (3,3):
-    raise SystemExit('Python version is %d.%d.%d, but S3QL requires Python 3.3 or newer'
-                     % sys.version_info[:3])
-
 try:
     import setuptools
 except ImportError:
     raise SystemExit('Setuptools package not found. Please install from '
                      'https://pypi.python.org/pypi/setuptools')
 from setuptools import Extension
+from setuptools.command.test import test as TestCommand
 
 from distutils.version import LooseVersion
 import os
 import subprocess
 import re
+import sys
 from glob import glob
 import faulthandler
 faulthandler.enable()
@@ -105,6 +101,16 @@ class build_docs(setuptools.Command):
                   os.path.join(dest_dir, 'manual.pdf'))
 
 
+class pytest(TestCommand):
+
+    def run_tests(self):
+        # import here, cause outside the eggs aren't loaded
+        import pytest
+
+        errno = pytest.main(['tests'])
+        sys.exit(errno)
+
+
 def main():
 
     with open(os.path.join(basedir, 'README.rst'), 'r') as fh:
@@ -120,7 +126,7 @@ def main():
             compile_args.append('-Werror')
 
         # Value-changing conversions should always be explicit.
-        #compile_args.append('-Werror=conversion')
+        compile_args.append('-Werror=conversion')
 
         # Note that (i > -1) is false if i is unsigned (-1 will be converted to
         # a large positive value). We certainly don't want to do this by
@@ -130,13 +136,19 @@ def main():
         compile_args.append('-Wno-unused-function')
 
     required_pkgs = ['apsw >= 3.7.0',
-                     'pycrypto',
+                     'cryptography',
                      'requests',
                      'defusedxml',
                      'dugong >= 3.4, < 4.0',
-                     'llfuse >= 1.0, < 2.0',
-                     'google-api-python-client >= 1.4.2']
+                     'google-auth',
+                     'google-auth-oauthlib',
 
+                     # earlier trio versions swallow exceptions raised by
+                     # pyfuse3.main().
+                     'trio >= 0.9',
+                     'pyfuse3 >= 1.0, < 2.0' ]
+    if sys.version_info < (3, 7, 0):
+        required_pkgs.append('async_generator')
 
     setuptools.setup(
           name='s3ql',
@@ -185,9 +197,11 @@ def main():
                          ]
                           },
           install_requires=required_pkgs,
+          tests_require=['pytest >= 3.7'],
           cmdclass={'upload_docs': upload_docs,
                     'build_cython': build_cython,
-                    'build_sphinx': build_docs },
+                    'build_sphinx': build_docs,
+                    'pytest': pytest },
           command_options={ 'sdist': { 'formats': ('setup.py', 'bztar') } },
          )
 

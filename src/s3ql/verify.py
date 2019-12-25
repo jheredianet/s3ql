@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 def _new_file_type(s, encoding='utf-8'):
     '''An argparse type for a file that does not yet exist'''
 
-    if os.path.exists(s):
+    if os.path.exists(s) and os.stat(s).st_size != 0:
         msg = 'File already exists - refusing to overwrite: %s' % s
         raise argparse.ArgumentTypeError(msg)
 
@@ -48,6 +48,7 @@ def parse_args(args):
         every object. It therefore takes a lot longer.
         '''))
 
+    parser.add_log()
     parser.add_debug()
     parser.add_quiet()
     parser.add_version()
@@ -131,8 +132,9 @@ def retrieve_objects(db, backend_factory, corrupted_fh, missing_fh,
     stamp1 = 0
     try:
         for (i, (obj_id, size)) in enumerate(db.query(sql)):
+            i += 1 # start at 1
             stamp2 = time.time()
-            if stamp2 - stamp1 > 1:
+            if stamp2 - stamp1 > 1 or i == total_count:
                 stamp1 = stamp2
                 progress = '%d objects (%.2f%%)' % (i, i/total_count * 100)
                 if full:
