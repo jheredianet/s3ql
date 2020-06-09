@@ -18,7 +18,9 @@ import hashlib
 import httplib2
 import ssl
 import http
+import re
 import socket
+import string
 import io
 import json
 import oauth2client.client
@@ -57,6 +59,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         # Unused argument
         #pylint: disable=W0613
         super().__init__()
+        self.cachedFolders = {}
         self.login = options.backend_login
         self.password = options.backend_password        
         client_secret_and_refresh_token = self.password.split(':')
@@ -79,7 +82,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         # get gdrive folder
         if mainFolder==None:
             folderPath = options.storage_url[len('gdrive://'):].rstrip('/')
-            self.folder = self._lookup_file(folderPath)
+            self.folder = self._initialize_folder(folderPath)
             if self.folder != None:
                 if self.folder['mimeType'] != Backend.MIME_TYPE_FOLDER:
                     raise DanglingStorageURLError(folderPath)
@@ -132,7 +135,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             yield from results.get('files', [])
             request = self.service.files().list_next(request,results)
 
-    def _lookup_file(self, name, folder=None):
+    def _initialize_folder(self, name, folder=None):
         '''Lookup file by name
         Arguments:
         name -- file name. May contain absolute or relative file name with '/' as path separator
@@ -150,6 +153,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         if len(n[0]) == 0:
             return folder
 
+
         # iterate over folder children
         query = "name = '{0}'".format(self._escape_string(n[0]))
         for f in self._list_files(folder, "id, name, mimeType, size,md5Checksum, properties", query):
@@ -166,6 +170,27 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
                 return None
 
         # nothing found
+        return None
+
+    def _lookup_file(self, name, folder=None):
+        '''Lookup file by name
+        Arguments:
+        name -- file name. May contain absolute or relative file name with '/' as path separator
+        folder -- folder to start lookup from (root folder if omitted)
+        '''
+        if folder is None:
+            folder = {'id': 'root', 'path': '/', 'mimeType': Backend.MIME_TYPE_FOLDER}
+
+        folderContext = self._get_object_folder_id(name)
+
+
+        # iterate over folder children
+        query = "name = '{0}'".format(self._escape_string(name))
+        for f in self._list_files(folderContext, "id, name, mimeType, size,md5Checksum, parents, properties", query):
+            log.debug("{0} ({1}: {2})".format(name, f['id'], f['mimeType']))
+            return f
+
+
         return None
 
     @staticmethod
@@ -259,6 +284,28 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             raise NoSuchObject(key)  
         return ObjectR(self.service, f, self._decode_metadata(f))
 
+    def _get_object_folder_id(self, key):
+        folderName = key.split('_')[-1][-3:]
+        if not folderName.isnumeric():
+            return self.folder
+
+        if folderName in self.cachedFolders.keys():
+            return self.cachedFolders[folderName]
+        query = "name = '{0}'".format(self._escape_string(folderName))
+        for f in self._list_files(self.folder, "id, name, mimeType", query):
+            if f['name'] == folderName:
+                self.cachedFolders[folderName]=f
+                return f
+
+        body={'name': folderName,
+              'mimeType' : Backend.MIME_TYPE_FOLDER,
+              'parents': [ self.folder['id'] ]
+              }
+        newFolder=self.service.files().create(body=body,fields='id').execute()
+        self.cachedFolders[folderName] = newFolder
+        return newFolder
+
+
     @prepend_ancestor_docstring
     def open_write(self, key, metadata=None, is_compressed=False):
         log.debug("key: {0}".format(key))
@@ -271,10 +318,11 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         if f is not None:
             log.debug("Object {0} already exist!".format(key))
             self._delete_by_id(f['id'])
+        folderContext = self._get_object_folder_id(key)
         body = {
             'name': key,
             'mimeType': Backend.MIME_TYPE_BINARY,
-            'parents': [ self.folder['id'] ],
+            'parents': [ folderContext['id'] ],
             'properties': self._encode_metadata(metadata),
         }
         log.debug("metadata: {0}, body: {1}".format(metadata, body))
@@ -283,54 +331,12 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
     @prepend_ancestor_docstring
     def clear(self):
         log.debug("")
-        for f in self._list_files(self.folder, "id"):
-            self._delete_by_id(f['id'])            
-    '''
-    @copy_ancestor_docstring
-    def delete_multi(self, keys, force=False):
-        log.debug('started with %s', keys)
-
-        while len(keys) > 0:
-            tmp = keys[:MAX_KEYS]
-            self._delete_multi(tmp, force=force)
-            keys[:MAX_KEYS] = tmp
-
-    def _delete_file_async(request_id, response, exception):
-        if exception is not None:
-            log.debug('Object %s deleted successfully',request_id)
-            delete_map_state[request_id]="ok"
-        else:
-            log.warning('an error occur trying to delete %s',key)
-            delete_map_state[request_id]=exception
-        
-    def _is_batch_completed(self,dictionary):
-        ocurredException= None
-        for key, state in dictionary.items():
-            if state == "pending":
-                return False 
-            elif isinstance(state,Exception):                
-                ocurredException= state
-
-        #Only raise Exceptions when all request has been procesed
-        if ocurredException:
-            raise ocurredException
-
-    @retry
-    def _delete_multi(self, keys, force=False):
-        batch = self.service.new_batch_http_request(callback=_delete_file_async)
-        delete_map_state = dict()
-        for f in self._list_files(self.folder, "id,name"):
-            if name in keys:
-                delete_map_state[f[name]]="pending"
-                batch.add(request_id=name,request=self.service.files().delete(fileId=f["id"]))
-
-        batch.execute()
-        while self.is_batch_completed(deleteMapState)==False:
-            time.sleep(0.2)
-    '''
-    
-
-
+        for f in self._list_files(self.folder, "name", query):
+            if f['mimeType'] == Backend.MIME_TYPE_FOLDER:
+                for j in self._list_files(f['id'], "name", query):
+                    self._delete_by_id(j['id'])
+            else:
+                self._delete_by_id(f['id'])
 
     @retry
     @copy_ancestor_docstring
@@ -338,7 +344,8 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         log.debug("key: {0}".format(key))
         query = "name = '{0}'".format(self._escape_string(key))
         found = False
-        for f in self._list_files(self.folder, "id", query):
+        folder = self._get_object_folder_id(key)
+        for f in self._list_files(folder, "id", query):
             found = True
             self._delete_by_id(f['id'])
         if not found:
@@ -353,7 +360,14 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         log.debug("prefix: {0}".format(prefix))
         # Google Drive "contains" operator does prefix match for "name"
         query = "name contains '{0}'".format(self._escape_string(prefix))
+        #First Scan parent path
         yield from map(lambda f: f['name'], self._list_files(self.folder, "name", query))
+        #cada cop que ha de buscar a de iterar per totes les carpetes!!? no mola..
+        for file in self._list_files(self.folder, "id,mimeType"):
+            if file['mimeType'] == Backend.MIME_TYPE_FOLDER:
+                yield from map(lambda f: f['name'], self._list_files(file, "name", query))
+
+        #yield from map(lambda f: f['name'], self._list_files(self.folder, "name", query))
 
     @copy_ancestor_docstring
     def update_meta(self, key, metadata):
@@ -367,7 +381,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
     def rename(self, src, dest, metadata=None,is_retry=False):
         if not (metadata is None or isinstance(metadata, dict)):
             raise TypeError('*metadata*: expected dict or None, got %s' % type(metadata))
-
+        target_folder = self._get_object_folder_id(dest)
         f = self._lookup_file(src, self.folder)
         if f is None:
             if is_retry:
@@ -377,12 +391,13 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             raise NoSuchObject(src)
         if metadata==None:
             metadata = self._decode_metadata(f)
+
         body = {
             'name': dest,
             'properties': self._encode_metadata(metadata),
         }
         log.debug("metadata: {0}, body: {1}".format(metadata, body))
-        new_f = self.service.files().update(fileId=f['id'], body=body).execute()
+        new_f = self.service.files().update(fileId=f['id'], body=body,addParents=target_folder['id'],removeParents=f['parents'][0]).execute()
         # delete other files with the same name
         query = "name = '{0}'".format(self._escape_string(new_f['name']))
         for other_f in self._list_files(self.folder, "id", query):
@@ -396,7 +411,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         log.debug("{0} -> {1}".format(src, dest))
         if not (metadata is None or isinstance(metadata, dict)):
             raise TypeError('*metadata*: expected dict or None, got %s' % type(metadata))
-
+        destinationFolder = self._get_object_folder_id(dest)
         f = self._lookup_file(src, self.folder)
         if f is None:
             raise NoSuchObject(src)
@@ -412,7 +427,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             body = {
                 'name': dest,
                 'mimeType': Backend.MIME_TYPE_BINARY,
-                'parents': [ self.folder['id'] ],
+                'parents': [ destinationFolder['id'] ],
                 'properties': self._encode_metadata(metadata),
             }
             log.debug("metadata: {0}, body: {1}".format(metadata, body))
@@ -420,7 +435,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
 
         # delete other files with the same name
         query = "name = '{0}'".format(self._escape_string(new_f['name']))
-        for other_f in self._list_files(self.folder, "id", query):
+        for other_f in self._list_files(destinationFolder, "id", query):
             if other_f['id'] != new_f['id']:
                 self._delete_by_id(other_f['id'])
         
