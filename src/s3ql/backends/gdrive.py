@@ -285,7 +285,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         return ObjectR(self.service, f, self._decode_metadata(f))
 
     def _get_object_folder_id(self, key):
-        folderName = key.split('_')[-1][-3:]
+        folderName = key.split('_')[-1][-1:]
         if not folderName.isnumeric():
             return self.folder
 
