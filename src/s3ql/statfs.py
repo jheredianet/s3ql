@@ -11,7 +11,7 @@ from .common import assert_fs_owner, pretty_print_size
 from .parse_args import ArgumentParser
 from prometheus_client import start_http_server, Metric, REGISTRY
 import time
-import llfuse
+import pyfuse3
 import struct
 import sys
 
@@ -55,33 +55,36 @@ def main(args=None):
         pprint = pretty_print_size
 
     ctrlfile = assert_fs_owner(options.mountpoint, mountpoint=True)
-    if options.prometheus_exporter:        
+
+    # Use a decent sized buffer, otherwise the statistics have to be
+    # calculated three(!) times because we need to invoke getxattr
+    # three times.
+    if options.prometheus_exporter:
         start_http_server(options.prometheus_port)
         REGISTRY.register(S3QLStatsCollector(ctrlfile))
         while True: time.sleep(1)
     else:
-        buf = llfuse.getxattr(ctrlfile, 's3qlstat', size_guess=256)
+        buf = pyfuse3.getxattr(ctrlfile, 's3qlstat', size_guess=256)
 
-        (entries, blocks, inodes, fs_size, dedup_size,
-        compr_size, db_size, cache_cnt, cache_size, dirty_cnt,
-        dirty_size, removal_cnt) = struct.unpack('QQQQQQQQQQQQ', buf)
-        p_dedup = dedup_size * 100 / fs_size if fs_size else 0
-        p_compr_1 = compr_size * 100 / fs_size if fs_size else 0
-        p_compr_2 = compr_size * 100 / dedup_size if dedup_size else 0
-        print ('Directory entries:    %d' % entries,
-            'Inodes:               %d' % inodes,
-            'Data blocks:          %d' % blocks,
-            'Total data size:      %s' % pprint(fs_size),
-            'After de-duplication: %s (%.2f%% of total)'
-                % (pprint(dedup_size), p_dedup),
-            'After compression:    %s (%.2f%% of total, %.2f%% of de-duplicated)'
-                % (pprint(compr_size), p_compr_1, p_compr_2),
-            'Database size:        %s (uncompressed)' % pprint(db_size),
-            'Cache size:           %s, %d entries' % (pprint(cache_size), cache_cnt),
-            'Cache size (dirty):   %s, %d entries' % (pprint(dirty_size), dirty_cnt),
-            'Queued object removals: %d' % (removal_cnt,),
-            sep='\n')
-    
+    (entries, blocks, inodes, fs_size, dedup_size,
+     compr_size, db_size, cache_cnt, cache_size, dirty_cnt,
+     dirty_size, removal_cnt) = struct.unpack('QQQQQQQQQQQQ', buf)
+    p_dedup = dedup_size * 100 / fs_size if fs_size else 0
+    p_compr_1 = compr_size * 100 / fs_size if fs_size else 0
+    p_compr_2 = compr_size * 100 / dedup_size if dedup_size else 0
+    print ('Directory entries:    %d' % entries,
+           'Inodes:               %d' % inodes,
+           'Data blocks:          %d' % blocks,
+           'Total data size:      %s' % pprint(fs_size),
+           'After de-duplication: %s (%.2f%% of total)'
+             % (pprint(dedup_size), p_dedup),
+           'After compression:    %s (%.2f%% of total, %.2f%% of de-duplicated)'
+             % (pprint(compr_size), p_compr_1, p_compr_2),
+           'Database size:        %s (uncompressed)' % pprint(db_size),
+           'Cache size:           %s, %d entries' % (pprint(cache_size), cache_cnt),
+           'Cache size (dirty):   %s, %d entries' % (pprint(dirty_size), dirty_cnt),
+           'Queued object removals: %d' % (removal_cnt,),
+           sep='\n')
 
 
 if __name__ == '__main__':
@@ -140,4 +143,3 @@ class S3QLStatsCollector(object):
         metric = Metric('svc_queue_removal','Cache size', 'summary')
         metric.add_sample('svc_queue_removal_count',value=removal_cnt, labels={})
         yield metric
-        

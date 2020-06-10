@@ -36,9 +36,9 @@ if 'S3QL_ENABLE_WARNINGS' in os.environ:
 from . import logging
 assert logging.LOG_ONCE  # prevent warnings about unused module
 
-from llfuse import ROOT_INODE
+from pyfuse3 import ROOT_INODE
 
-VERSION = '2.32'
+VERSION = '3.4.1'
 RELEASE = '%s' % VERSION
 
 # TODO: On next revision bump, remove upgrade code from backend/comprenc.py and

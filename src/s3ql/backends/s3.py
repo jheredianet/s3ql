@@ -36,7 +36,7 @@ class Backend(s3c.Backend):
     may or may not be available and can be queried for with instance methods.
     """
 
-    known_options = ((s3c.Backend.known_options | { 'sse', 'rrs', 'ia' })
+    known_options = ((s3c.Backend.known_options | {'sse', 'rrs', 'ia', 'oia', 'it'})
                      - {'dumb-copy', 'disable-expect100'})
 
     def __init__(self, options):
@@ -91,9 +91,13 @@ class Backend(s3c.Backend):
             headers['x-amz-server-side-encryption'] = 'AES256'
 
         if 'ia' in self.options:
-            sc =  'STANDARD_IA'
+            sc = 'STANDARD_IA'
+        elif 'oia' in self.options:
+            sc = 'ONEZONE_IA'
         elif 'rrs' in self.options:
             sc = 'REDUCED_REDUNDANCY'
+        elif 'it' in self.options:
+            sc = 'INTELLIGENT_TIERING'
         else:
             sc = 'STANDARD'
         headers['x-amz-storage-class'] = sc
@@ -148,17 +152,13 @@ class Backend(s3c.Backend):
                               errtag.findtext(ns_p + 'Key')[offset:],
                               errtag.findtext(ns_p + 'Code'))
 
-            # If *force*, just modify the passed list and return without
-            # raising an exception, otherwise raise exception for the first error
-            if force:
-                return
-
             errcode = error_tags[0].findtext(ns_p + 'Code')
             errmsg = error_tags[0].findtext(ns_p + 'Message')
             errkey = error_tags[0].findtext(ns_p + 'Key')[offset:]
 
             if errcode == 'NoSuchKeyError':
-                raise NoSuchObject(errkey)
+                if not force:
+                    raise NoSuchObject(errkey)
             else:
                 raise get_S3Error(errcode, 'Error deleting %s: %s' % (errkey, errmsg))
 

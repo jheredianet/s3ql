@@ -9,8 +9,7 @@ This work can be distributed under the terms of the GNU GPLv3.
 from ..logging import logging, QuietError, LOG_ONCE # Ensure use of custom logger class
 from .. import BUFSIZE
 from .common import (AbstractBackend, NoSuchObject, retry, AuthorizationError,
-                     DanglingStorageURLError, retry_generator, get_proxy,
-                     get_ssl_context)
+                     DanglingStorageURLError, get_proxy, get_ssl_context)
 from .s3c import HTTPError, ObjectR, ObjectW, md5sum_b64, BadDigestError
 from . import s3c
 from ..inherit_docstrings import (copy_ancestor_docstring, prepend_ancestor_docstring,
@@ -40,13 +39,13 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
 
     hdr_prefix = 'X-Object-'
     known_options = {'no-ssl', 'ssl-ca-path', 'tcp-timeout',
-                     'disable-expect100', 'no-feature-detection'}
+                     'disable-expect100', 'no-feature-detection',
+                     'domain', 'project_domain'}
 
     _add_meta_headers = s3c.Backend._add_meta_headers
     _extractmeta = s3c.Backend._extractmeta
     _assert_empty_response = s3c.Backend._assert_empty_response
     _dump_response = s3c.Backend._dump_response
-    clear = s3c.Backend.clear
     reset = s3c.Backend.reset
 
     def __init__(self, options):
@@ -476,7 +475,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         resp = self._do_request('POST', '/', subres='bulk-delete', body=body, headers=headers)
 
         # bulk deletes should always return 200
-        if resp.status is not 200:
+        if resp.status != 200:
             raise HTTPError(resp.status, resp.reason, resp.headers)
 
         hit = re.match(r'^application/json(;\s*charset="?(.+?)"?)?$',
@@ -498,7 +497,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         except ValueError:
             raise RuntimeError('Unexpected server reply')
 
-        if resp_status_code is 200:
+        if resp_status_code == 200:
             # No errors occured, everything has been deleted
             del keys[:]
             return
@@ -642,7 +641,12 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         if metadata is not None:
             self._add_meta_headers(headers, metadata, chunksize=self.features.max_meta_len)
             headers['X-Fresh-Metadata'] = 'true'
-        resp = self._do_request('COPY', '/%s%s' % (self.prefix, src), headers=headers)
+        try:
+            resp = self._do_request('COPY', '/%s%s' % (self.prefix, src), headers=headers)
+        except HTTPError as exc:
+            if exc.status == 404:
+                raise NoSuchObject(src)
+            raise
         self._assert_empty_response(resp)
 
     @copy_ancestor_docstring
@@ -665,55 +669,62 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         self._do_request('POST', '/%s%s' % (self.prefix, key), headers=headers)
         self.conn.discard()
 
-    @retry_generator
     @copy_ancestor_docstring
-    def list(self, prefix='', start_after='', batch_size=5000):
-        log.debug('started with %s, %s', prefix, start_after)
-
-        keys_remaining = True
-        marker = self.prefix + start_after
+    def list(self, prefix=''):
         prefix = self.prefix + prefix
-
-        while keys_remaining:
-            log.debug('requesting with marker=%s', marker)
-
-            try:
-                resp = self._do_request('GET', '/', query_string={'prefix': prefix,
-                                                                  'format': 'json',
-                                                                  'marker': marker,
-                                                                  'limit': batch_size })
-            except HTTPError as exc:
-                if exc.status == 404:
-                    raise DanglingStorageURLError(self.container_name)
-                raise
-
-            if resp.status == 204:
-                return
-
-            hit = re.match('application/json; charset="?(.+?)"?$',
-                           resp.headers['content-type'])
-            if not hit:
-                log.error('Unexpected server response. Expected json, got:\n%s',
-                          self._dump_response(resp))
-                raise RuntimeError('Unexpected server reply')
-
-            strip = len(self.prefix)
-            count = 0
-            try:
-                # JSON does not have a streaming API, so we just read
-                # the entire response in memory.
-                for dataset in json.loads(self.conn.read().decode(hit.group(1))):
-                    count += 1
-                    marker = dataset['name']
-                    if marker.endswith(TEMP_SUFFIX):
-                        continue
-                    yield marker[strip:]
-
-            except GeneratorExit:
-                self.conn.discard()
+        strip = len(self.prefix)
+        page_token = None
+        while True:
+            (els, page_token) = self._list_page(prefix, page_token)
+            for el in els:
+                yield el[strip:]
+            if page_token is None:
                 break
 
-            keys_remaining = count == batch_size
+    @retry
+    def _list_page(self, prefix, page_token=None, batch_size=1000):
+
+        # Limit maximum number of results since we read everything
+        # into memory (because Python JSON doesn't have a streaming API)
+        query_string = { 'prefix': prefix, 'limit': str(batch_size),
+                         'format': 'json' }
+        if page_token:
+            query_string['marker'] = page_token
+
+        try:
+            resp = self._do_request('GET', '/', query_string=query_string)
+        except HTTPError as exc:
+            if exc.status == 404:
+                raise DanglingStorageURLError(self.container_name)
+            raise
+
+        if resp.status == 204:
+            return
+
+        hit = re.match('application/json; charset="?(.+?)"?$',
+                       resp.headers['content-type'])
+        if not hit:
+            log.error('Unexpected server response. Expected json, got:\n%s',
+                      self._dump_response(resp))
+            raise RuntimeError('Unexpected server reply')
+
+        body = self.conn.readall()
+        names = []
+        count = 0
+        for dataset in json.loads(body.decode(hit.group(1))):
+            count += 1
+            name = dataset['name']
+            if name.endswith(TEMP_SUFFIX):
+                continue
+            names.append(name)
+
+        if count == batch_size:
+            page_token = names[-1]
+        else:
+            page_token = None
+
+        return (names, page_token)
+
 
     @copy_ancestor_docstring
     def close(self):
@@ -751,7 +762,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
                           self._dump_response(resp, body=conn.read(2048)))
                 raise HTTPError(resp.status, resp.reason, resp.headers)
 
-            if resp.status is 200:
+            if resp.status == 200:
                 hit = re.match(r'^application/json(;\s*charset="?(.+?)"?)?$',
                 resp.headers['content-type'])
                 if not hit:

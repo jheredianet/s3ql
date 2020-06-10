@@ -1,6 +1,6 @@
 ..
   NOTE: We cannot use sophisticated ReST syntax here because this
-  file is rendered by Bitbucket.
+  file is rendered by GitHub.
 
 ======
  S3QL
@@ -8,7 +8,7 @@
 
 S3QL is a file system that stores all its data online using storage
 services like `Google Storage`_, `Amazon S3`_, or OpenStack_. S3QL
-effectively provides a hard disk of dynamic, infinite capacity that
+effectively provides a virtual drive of dynamic, infinite capacity that
 can be accessed from any computer with internet access.
 
 S3QL is a standard conforming, full featured UNIX file system that is
@@ -39,7 +39,7 @@ Features
 * **Dynamic Size.** The size of an S3QL file system grows and shrinks
   dynamically as required.
 
-* **Compression.** Before storage, all data may compressed with the
+* **Compression.** Before storage, all data may be compressed with the
   LZMA, bzip2 or deflate (gzip) algorithm.
 
 * **Encryption.** After compression (but before upload), all data can be
@@ -118,7 +118,7 @@ To mount the S3QL file system stored in the S3 bucket
   mount.s3ql s3://ap-south-1/nikratio-s3ql-bucket /mnt/s3ql
 
 Now you can instruct your favorite backup program to run a backup into
-the directory ``/mnt/s3ql`` and the data will be stored an Amazon
+the directory ``/mnt/s3ql`` and the data will be stored on Amazon
 S3. When you are done, the file system has to be unmounted with ::
 
    umount.s3ql /mnt/s3ql
@@ -130,17 +130,17 @@ Need Help?
 The following resources are available:
 
 * The `S3QL User's Guide`_.
-* The `S3QL Wiki`_, which also contains the `S3QL FAQ`_.
-* The `S3QL Mailing List`_. You can subscribe by sending a mail to
-  `s3ql+subscribe@googlegroups.com
-  <mailto:s3ql+subscribe@googlegroups.com>`_.
+* The `S3QL Wiki <https://github.com/s3ql/s3ql/wiki>`_
+* The `S3QL Mailing List <http://groups.google.com/group/s3ql>`_. You
+  can subscribe by sending a mail to
+  `s3ql+subscribe@googlegroups.com <mailto:s3ql+subscribe@googlegroups.com>`_.
 
 Please report any bugs you may encounter in the `GitHub Issue Tracker`_.
 
 Contributing
 ============
 
-The S3QL source code is available both on GitHub_ and BitBucket_.
+The S3QL source code is available on GitHub_.
 
 Professional Support
 --------------------
@@ -148,11 +148,7 @@ Professional Support
 Professional support is offered via `Rath Consulting`_.
 
 .. _`S3QL User's Guide`: http://www.rath.org/s3ql-docs/index.html
-.. _`S3QL Wiki`: https://bitbucket.org/nikratio/s3ql/wiki/
-.. _`Installation Instructions`: https://bitbucket.org/nikratio/s3ql/wiki/Installation
-.. _`S3QL FAQ`: https://bitbucket.org/nikratio/s3ql/wiki/FAQ
 .. _`S3QL Mailing List`: http://groups.google.com/group/s3ql
 .. _`GitHub Issue Tracker`: https://github.com/s3ql/s3ql/issues
-.. _BitBucket: https://bitbucket.org/nikratio/s3ql/
 .. _GitHub: https://github.com/s3ql/main
 .. _`Rath Consulting`: http://www.rath-consulting.biz/

@@ -8,16 +8,15 @@ This work can be distributed under the terms of the GNU GPLv3.
 
 from .logging import logging, setup_logging, QuietError
 from .parse_args import ArgumentParser
-
 from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.client import AccessTokenCredentials
 from  oauth2client.client import OOB_CALLBACK_URN
 from .common import OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 import sys
 import textwrap
 import requests
-import time
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +29,7 @@ def parse_args(args):
         Obtain OAuth2 refresh token for Google Storage
         '''))
 
+    parser.add_log()
     parser.add_debug()
     parser.add_quiet()
     parser.add_version()
@@ -87,43 +87,21 @@ def googleDrive(options):
 
 
 def googleStorage(options):
-    cli = requests.Session()
+    flow = InstalledAppFlow.from_client_config(
+        client_config={
+              "installed": {
+                  "client_id": OAUTH_CLIENT_ID,
+                  "client_secret": OAUTH_CLIENT_SECRET,
+                  "redirect_uris": ["http://localhost", "urn:ietf:wg:oauth:2.0:oob"],
+                  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                  "token_uri": "https://accounts.google.com/o/oauth2/token"
+              }
+        },
+        scopes=['https://www.googleapis.com/auth/devstorage.full_control'])
 
-    # We need full control in order to be able to update metadata
-    # cf. https://stackoverflow.com/questions/24718787
-    r = cli.post('https://accounts.google.com/o/oauth2/device/code',
-                 data={ 'client_id': options.client_id,
-                        'scope': 'https://www.googleapis.com/auth/devstorage.full_control' },
-                 verify=True, allow_redirects=False, timeout=20)
-    req_json = _parse_response(r)
+    credentials = flow.run_local_server(open_browser=True)
 
-    print(textwrap.fill('Please open %s in your browser and enter the following '
-                        'user code: %s' % (req_json['verification_url'],
-                                           req_json['user_code'])))
-
-    while True:
-        log.debug('polling..')
-        time.sleep(req_json['interval'])
-
-        r = cli.post('https://accounts.google.com/o/oauth2/token',
-                     data={ 'client_id': options.client_id,
-                            'client_secret': options.client_secret,
-                            'code': req_json['device_code'],
-                            'grant_type': 'http://oauth.net/grant_type/device/1.0' },
-                     verify=True, allow_redirects=False, timeout=20)
-        resp_json = _parse_response(r)
-        r.close()
-
-        if 'error' in resp_json:
-            if resp_json['error'] == 'authorization_pending':
-                continue
-            else:
-                raise QuietError('Authentication failed: ' + resp_json['error'])
-        else:
-            break
-
-    print('Success. Your refresh token is:\n',
-          resp_json['refresh_token'])
+    print('Success. Your refresh token is:\n', credentials.refresh_token)
 
 
 def main(args=None):

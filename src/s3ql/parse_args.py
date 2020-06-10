@@ -187,9 +187,32 @@ class ArgumentParser(argparse.ArgumentParser):
 
     def add_oauth(self):
         self.add_argument("--oauth_type", metavar='<oauth_type>',default="google-storage",type=oauth_type,
-                                help="Generate Oauth2 Token for google-storage or google-drive")                                    
+                                help="Generate Oauth2 Token for google-storage or google-drive")
         self.add_argument("--client_id", metavar='<client_id>',default="",help="Client ID used to generate access tokens")
         self.add_argument("--client_secret", metavar='<client_secret>',default="",help="Client secret used to generate access tokens")
+
+    def add_compress(self):
+        def compression_type(s):
+            hit = re.match(r'^([a-z0-9]+)(?:-([0-9]))?$', s)
+            if not hit:
+                raise argparse.ArgumentTypeError('%s is not a valid --compress value' % s)
+            alg = hit.group(1)
+            lvl = hit.group(2)
+            if alg not in ('none', 'zlib', 'bzip2', 'lzma'):
+                raise argparse.ArgumentTypeError('Invalid compression algorithm: %s' % alg)
+            if lvl is None:
+                lvl = 6
+            else:
+                lvl = int(lvl)
+            if alg == 'none':
+                alg = None
+            return (alg, lvl)
+        self.add_argument("--compress", action="store", default='lzma-6',
+                            metavar='<algorithm-lvl>', type=compression_type,
+                            help="Compression algorithm and compression level to use when "
+                                 "storing new data. *algorithm* may be any of `lzma`, `bzip2`, "
+                                 "`zlib`, or none. *lvl* may be any integer from 0 (fastest) "
+                                 "to 9 (slowest). Default: `%(default)s`")
 
     def add_subparsers(self, **kw):
         '''Pass parent and set prog to default usage message'''
@@ -208,12 +231,53 @@ class ArgumentParser(argparse.ArgumentParser):
 
         return super().add_subparsers(**kw)
 
+    def _read_authinfo(self, path, storage_url):
+
+        ini_config = configparser.ConfigParser()
+        if os.path.isfile(path):
+            mode = os.stat(path).st_mode
+            if mode & (stat.S_IRGRP | stat.S_IROTH):
+                self.exit(12, "%s has insecure permissions, aborting." % path)
+            ini_config.read(path)
+
+        merged = dict()
+        for section in ini_config.sections():
+            pattern = ini_config[section].get('storage-url', None)
+            if not pattern or not storage_url.startswith(pattern):
+                continue
+
+            for (key, val) in ini_config[section].items():
+                if key != 'storage-url':
+                    merged[key] = val
+        return merged
+
     def parse_args(self, *args, **kwargs):
 
         try:
             options = super().parse_args(*args, **kwargs)
         except ArgumentError as exc:
             self.error(str(exc))
+
+        if hasattr(options, 'authfile'):
+            storage_url = getattr(options, 'storage_url', '')
+            ini_config = self._read_authinfo(options.authfile, storage_url)
+
+            # Validate configuration file
+            fixed_keys = { 'backend-login', 'backend-password', 'fs-passphrase',
+                           'storage-url' }
+            unknown_keys = (set(ini_config.keys())
+                            - { x.replace('_', '-') for x in options.__dict__.keys() }
+                            - fixed_keys)
+            if unknown_keys:
+                            self.exit(2, 'Unknown keys(s) in configuration file: ' +
+                                      ', '.join(unknown_keys))
+
+            # Update defaults and re-parse arguments
+            defaults = { k.replace('-', '_'): v
+                         for (k,v) in ini_config.items()
+                         if k != 'storage_url' }
+            self.set_defaults(**defaults)
+            options = super().parse_args(*args, **kwargs)
 
         if hasattr(options, 'storage_url'):
             self._init_backend_factory(options)
@@ -247,27 +311,10 @@ class ArgumentParser(argparse.ArgumentParser):
         except KeyError:
             self.exit(11, 'No such backend: ' + backend)
 
-        # Read authfile
-        ini_config = configparser.ConfigParser()
-        if os.path.isfile(options.authfile):
-            mode = os.stat(options.authfile).st_mode
-            if mode & (stat.S_IRGRP | stat.S_IROTH):
-                self.exit(12, "%s has insecure permissions, aborting."
-                          % options.authfile)
-            ini_config.read(options.authfile)
-
-        # Validate backend options
         backend_options = options.backend_options
         for opt in backend_options.keys():
             if opt not in backend_class.known_options:
                 self.exit(3, 'Unknown backend option: ' + opt)
-
-        valid_keys = backend_class.known_options | {
-            'backend_login', 'backend_password', 'fs_passphrase' }
-        unknown = _merge_sections(ini_config, options, valid_keys)
-        if unknown:
-            self.exit(2, 'Unknown key(s) in configuration file: ' +
-                      ', '.join(unknown))
 
         if not hasattr(options, 'backend_login') and backend_class.needs_login:
             if sys.stdin.isatty():
@@ -283,45 +330,12 @@ class ArgumentParser(argparse.ArgumentParser):
 
         options.backend_class = backend_class
 
-
-def _merge_sections(ini_config, options, valid_keys):
-    '''Merge configuration sections from *ini_config* into *options*
-
-    Merge the data from all sections that apply to the given storage
-    URL. Later sections take precedence over earlier sections.
-
-    Keys in *ini_config* that are neither in *options* nor in *valid_keys* will
-    be returned.
-
-    Dashes will be replaced by underscores.
-    '''
-
-    storage_url = options.storage_url
-    merged = dict()
-    for section in ini_config.sections():
-        pattern = ini_config[section].get('storage-url', None)
-        if not pattern or not storage_url.startswith(pattern):
-            continue
-
-        for (key, val) in ini_config[section].items():
-            if key != 'storage-url':
-                merged[key.replace('-', '_')] = val
-
-    unknown = set()
-    for (key, val) in merged.items():
-        if key not in valid_keys and not hasattr(options, key):
-            unknown.add(key)
-        else:
-            setattr(options, key, val)
-
-    return unknown
-
-
-def oauth_type(s):  
+def oauth_type(s):
     '''Validate a valid oauth type'''
     if s not in ['google-storage','google-drive']:
         raise ArgumentTypeError('%s is not a valid oauth type.' % s)
     return s
+
 
 def storage_url_type(s):
     '''Validate and canonicalize storage url'''

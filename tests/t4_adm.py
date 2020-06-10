@@ -23,7 +23,7 @@ import unittest
 import subprocess
 import pytest
 
-@pytest.mark.usefixtures('s3ql_cmd_argv', 'pass_reg_output')
+@pytest.mark.usefixtures('pass_s3ql_cmd_argv', 'pass_reg_output')
 class AdmTests(unittest.TestCase):
 
     def setUp(self):
@@ -79,28 +79,20 @@ class AdmTests(unittest.TestCase):
 
         backend.fetch('s3ql_passphrase') # will fail with wrong pw
 
-
-    def test_authinfo(self):
+    def test_clear(self):
         self.mkfs()
 
-        with tempfile.NamedTemporaryFile('wt') as fh:
-            print('[entry1]',
-                  'storage-url: local://',
-                  'fs-passphrase: clearly wrong',
-                  '',
-                  '[entry2]',
-                  'storage-url: %s' % self.storage_url,
-                  'fs-passphrase: %s' % self.passphrase,
-                  file=fh, sep='\n')
-            fh.flush()
+        proc = subprocess.Popen(self.s3ql_cmd_argv('s3qladm') +
+                                [ '--quiet', '--log', 'none', '--authfile',
+                                  '/dev/null', 'clear', self.storage_url ],
+                                stdin=subprocess.PIPE, universal_newlines=True)
+        print('yes', file=proc.stdin)
+        proc.stdin.close()
+        self.assertEqual(proc.wait(), 0)
 
-            proc = subprocess.Popen(self.s3ql_cmd_argv('fsck.s3ql') +
-                                    [ '--quiet', '--authfile', fh.name,
-                                      '--cachedir', self.cache_dir, '--log', 'none', self.storage_url ],
-                                    stdin=subprocess.PIPE, universal_newlines=True)
-
-            proc.stdin.close()
-            self.assertEqual(proc.wait(), 0)
+        plain_backend = local.Backend(Namespace(
+            storage_url=self.storage_url))
+        assert list(plain_backend.list()) == []
 
 
     def test_key_recovery(self):
