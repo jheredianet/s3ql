@@ -9,7 +9,7 @@ This work can be distributed under the terms of the GNU GPLv3.
 
 from ..logging import logging # Ensure use of custom logger class
 from ..inherit_docstrings import (copy_ancestor_docstring,prepend_ancestor_docstring, ABCDocstMeta)
-from .common import (AbstractBackend, DanglingStorageURLError, NoSuchObject,retry,retry_generator,AuthenticationError)
+from .common import (AbstractBackend, DanglingStorageURLError, NoSuchObject,retry,AuthenticationError)
 import apiclient.discovery
 import apiclient.http
 import time
@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 logging.getLogger("googleapiclient.discovery").setLevel(logging.WARNING)
 
 
-
+UPGRADE_MODE=False
 # Maximum number of keys that can be deleted at once
 MAX_KEYS = 1000
 credentials= None
@@ -115,7 +115,8 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         '''Escape string'''
         return name.replace("\\", "\\\\").replace("'", "\\'")
 
-    def _list_files(self, folder, fields, query=None):
+
+    def _list_files(self, folders, fields, query=None):
         '''List folder contents
         Arguments:
         folder -- Google Drive folder to list files in
@@ -127,13 +128,27 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             query = ''
         else:
             query += ' and '
-        query += "'{0}' in parents".format(folder['id'])
+        i=0
+        query +=" ( "
+        for folder in folders:
+            if i>0:
+                query +=" or "
+            query += "'{0}' in parents".format(folder['id'])
+            i+=1
+        query += " )"
         query += " and trashed = false"
-        request = self.service.files().list(q=query,pageSize=1000,fields="nextPageToken, files(%s)" % fields)
-        while request is not None:
-            results = request.execute()            
-            yield from results.get('files', [])
-            request = self.service.files().list_next(request,results)
+        request = self.service.files().list(q=query, pageSize=1000, fields="nextPageToken, files(%s)" % fields)
+        while True:
+            results, request = self._list_page_request(request)
+            yield from results
+            if request is None:
+                break
+
+    @retry
+    def _list_page_request(self,request):
+        results = request.execute()
+        new_request = self.service.files().list_next(request, results)
+        return results.get('files', []), new_request
 
     def _initialize_folder(self, name, folder=None):
         '''Lookup file by name
@@ -156,7 +171,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
 
         # iterate over folder children
         query = "name = '{0}'".format(self._escape_string(n[0]))
-        for f in self._list_files(folder, "id, name, mimeType, size,md5Checksum, properties", query):
+        for f in self._list_files([folder], "id, name, mimeType, size,md5Checksum, properties", query):
             f['path'] = folder['path'] + f['name']
             if f['mimeType'] == Backend.MIME_TYPE_FOLDER:
                 f['path'] += '/'
@@ -186,7 +201,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
 
         # iterate over folder children
         query = "name = '{0}'".format(self._escape_string(name))
-        for f in self._list_files(folderContext, "id, name, mimeType, size,md5Checksum, parents, properties", query):
+        for f in self._list_files([folderContext], "id, name, mimeType, size,md5Checksum, parents, properties", query):
             log.debug("{0} ({1}: {2})".format(name, f['id'], f['mimeType']))
             return f
 
@@ -255,6 +270,11 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
     def has_native_rename(self):
         return True
 
+    @property
+    @copy_ancestor_docstring
+    def has_delete_multi(self):
+        return False
+
     def __str__(self):
         return 'gdrive folder %s@%s' % (self.login, self.prefix)
 
@@ -285,14 +305,14 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         return ObjectR(self.service, f, self._decode_metadata(f))
 
     def _get_object_folder_id(self, key):
-        folderName = key.split('_')[-1][-1:]
+        folderName = key.split('_')[-1][-3:]
         if not folderName.isnumeric():
             return self.folder
 
         if folderName in self.cachedFolders.keys():
             return self.cachedFolders[folderName]
         query = "name = '{0}'".format(self._escape_string(folderName))
-        for f in self._list_files(self.folder, "id, name, mimeType", query):
+        for f in self._list_files([self.folder], "id, name, mimeType", query):
             if f['name'] == folderName:
                 self.cachedFolders[folderName]=f
                 return f
@@ -328,16 +348,6 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         log.debug("metadata: {0}, body: {1}".format(metadata, body))
         return ObjectW(self.service,self, key,body)
 
-    @prepend_ancestor_docstring
-    def clear(self):
-        log.debug("")
-        for f in self._list_files(self.folder, "name", query):
-            if f['mimeType'] == Backend.MIME_TYPE_FOLDER:
-                for j in self._list_files(f['id'], "name", query):
-                    self._delete_by_id(j['id'])
-            else:
-                self._delete_by_id(f['id'])
-
     @retry
     @copy_ancestor_docstring
     def delete(self, key, force=False, is_retry=False):
@@ -345,7 +355,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         query = "name = '{0}'".format(self._escape_string(key))
         found = False
         folder = self._get_object_folder_id(key)
-        for f in self._list_files(folder, "id", query):
+        for f in self._list_files([folder], "id", query):
             found = True
             self._delete_by_id(f['id'])
         if not found:
@@ -354,20 +364,25 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             else:
                 raise NoSuchObject(key)
 
-    @retry_generator
     @copy_ancestor_docstring
     def list(self, prefix=''):
         log.debug("prefix: {0}".format(prefix))
         # Google Drive "contains" operator does prefix match for "name"
         query = "name contains '{0}'".format(self._escape_string(prefix))
         #First Scan parent path
-        yield from map(lambda f: f['name'], self._list_files(self.folder, "name", query))
+        yield from map(lambda f: f['name'], self._list_files([self.folder], "name", query))
         #cada cop que ha de buscar a de iterar per totes les carpetes!!? no mola..
-        for file in self._list_files(self.folder, "id,mimeType"):
+        i=0
+        folders=[]
+        for file in self._list_files([self.folder], "id,mimeType,name"):
             if file['mimeType'] == Backend.MIME_TYPE_FOLDER:
-                yield from map(lambda f: f['name'], self._list_files(file, "name", query))
+                folders.append(file)
+                i+=1
+                if i>75:
+                    i=0
+                    yield from map(lambda f: f['name'], self._list_files(folders, "name", query))
+                    folders = []
 
-        #yield from map(lambda f: f['name'], self._list_files(self.folder, "name", query))
 
     @copy_ancestor_docstring
     def update_meta(self, key, metadata):
@@ -400,7 +415,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
         new_f = self.service.files().update(fileId=f['id'], body=body,addParents=target_folder['id'],removeParents=f['parents'][0]).execute()
         # delete other files with the same name
         query = "name = '{0}'".format(self._escape_string(new_f['name']))
-        for other_f in self._list_files(self.folder, "id", query):
+        for other_f in self._list_files([self.folder], "id", query):
             if other_f['id'] != new_f['id']:
                 self._delete_by_id(other_f['id'])
 
@@ -435,7 +450,7 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
 
         # delete other files with the same name
         query = "name = '{0}'".format(self._escape_string(new_f['name']))
-        for other_f in self._list_files(destinationFolder, "id", query):
+        for other_f in self._list_files([destinationFolder], "id", query):
             if other_f['id'] != new_f['id']:
                 self._delete_by_id(other_f['id'])
         
