@@ -87,11 +87,20 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
                 if self.folder['mimeType'] != Backend.MIME_TYPE_FOLDER:
                     raise DanglingStorageURLError(folderPath)
             else:
-                self.folder = self.service.files().create(body={'name' : folderPath,'mimeType' : Backend.MIME_TYPE_FOLDER},fields='id').execute()
+                self.folder = self._create_folder(folderPath)
             mainFolder=self.folder
         else:
             self.folder = mainFolder
 
+    @retry
+    def _create_folder(self,folder):
+        return self.service.files().create(body={'name': folder, 'mimeType': Backend.MIME_TYPE_FOLDER},
+                                    fields='id').execute()
+
+    @retry
+    def _change_parent_object(self,drive_object_id,old_parent,new_parent):
+        return self.service.files().update(fileId=drive_object_id, body={}, addParents=new_parent,
+                               removeParents=old_parent).execute()
     def _get_credentials(self):
         return oauth2client.client.OAuth2Credentials(access_token="1234",client_id=self.login,client_secret=self.client_secret,
         refresh_token=self.refresh_token,token_expiry="0000-00-00T00:00:00Z",token_uri=Backend.TOKEN_URI,user_agent=Backend.USER_AGENT)
@@ -304,26 +313,28 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
             raise NoSuchObject(key)  
         return ObjectR(self.service, f, self._decode_metadata(f))
 
-    def _get_object_folder_id(self, key):
-        folderName = key.split('_')[-1][-3:]
+    def _get_object_folder_id(self, key,base_folder=None):
+        if base_folder is None:
+            base_folder=self.folder
+        folderName = key.split('_')[-1][-1:]
         if not folderName.isnumeric():
-            return self.folder
+            return base_folder
 
         if folderName in self.cachedFolders.keys():
             return self.cachedFolders[folderName]
         query = "name = '{0}'".format(self._escape_string(folderName))
-        for f in self._list_files([self.folder], "id, name, mimeType", query):
+        for f in self._list_files([base_folder], "id, name, mimeType", query):
             if f['name'] == folderName:
                 self.cachedFolders[folderName]=f
                 return f
 
         body={'name': folderName,
               'mimeType' : Backend.MIME_TYPE_FOLDER,
-              'parents': [ self.folder['id'] ]
+              'parents': [ base_folder['id'] ]
               }
-        newFolder=self.service.files().create(body=body,fields='id').execute()
-        self.cachedFolders[folderName] = newFolder
-        return newFolder
+        new_folder=self.service.files().create(body=body,fields='id').execute()
+        self.cachedFolders[folderName] = new_folder
+        return new_folder
 
 
     @prepend_ancestor_docstring
