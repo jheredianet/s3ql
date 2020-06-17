@@ -393,6 +393,8 @@ class Backend(AbstractBackend, metaclass=ABCDocstMeta):
                     i=0
                     yield from map(lambda f: f['name'], self._list_files(folders, "name", query))
                     folders = []
+        if len(folders)>0:
+            yield from map(lambda f: f['name'], self._list_files(folders, "name", query))
 
 
     @copy_ancestor_docstring
