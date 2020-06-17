@@ -185,10 +185,9 @@ class ArgumentParser(argparse.ArgumentParser):
                       help='Read authentication credentials from this file '
                            '(default: `~/.s3ql/authinfo2)`')
 
-
     def add_oauth(self):
         self.add_argument("--oauth_type", metavar='<oauth_type>',default="google-storage",type=oauth_type,
-                                help="Generate Oauth2 Token for google-storage or google-drive")                                    
+                                help="Generate Oauth2 Token for google-storage or google-drive")
         self.add_argument("--client_id", metavar='<client_id>',default="",help="Client ID used to generate access tokens")
         self.add_argument("--client_secret", metavar='<client_secret>',default="",help="Client secret used to generate access tokens")
 
@@ -214,7 +213,6 @@ class ArgumentParser(argparse.ArgumentParser):
                                  "storing new data. *algorithm* may be any of `lzma`, `bzip2`, "
                                  "`zlib`, or none. *lvl* may be any integer from 0 (fastest) "
                                  "to 9 (slowest). Default: `%(default)s`")
-
 
     def add_subparsers(self, **kw):
         '''Pass parent and set prog to default usage message'''
@@ -332,42 +330,7 @@ class ArgumentParser(argparse.ArgumentParser):
 
         options.backend_class = backend_class
 
-
-
-def _merge_sections(ini_config, options, valid_keys):
-    '''Merge configuration sections from *ini_config* into *options*
-
-    Merge the data from all sections that apply to the given storage
-    URL. Later sections take precedence over earlier sections.
-
-    Keys in *ini_config* that are neither in *options* nor in *valid_keys* will
-    be returned.
-
-    Dashes will be replaced by underscores.
-    '''
-
-    storage_url = options.storage_url
-    merged = dict()
-    for section in ini_config.sections():
-        pattern = ini_config[section].get('storage-url', None)
-        if not pattern or not storage_url.startswith(pattern):
-            continue
-
-        for (key, val) in ini_config[section].items():
-            if key != 'storage-url':
-                merged[key.replace('-', '_')] = val
-
-    unknown = set()
-    for (key, val) in merged.items():
-        if key not in valid_keys and not hasattr(options, key):
-            unknown.add(key)
-        else:
-            setattr(options, key, val)
-
-    return unknown
-
-
-def oauth_type(s):  
+def oauth_type(s):
     '''Validate a valid oauth type'''
     if s not in ['google-storage','google-drive']:
         raise ArgumentTypeError('%s is not a valid oauth type.' % s)

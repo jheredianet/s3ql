@@ -358,7 +358,7 @@ class Operations(pyfuse3.Operations):
                         queue.append((id_p, name_id))
                         break
 
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         log.debug('finished')
 
@@ -410,7 +410,7 @@ class Operations(pyfuse3.Operations):
             batch_size = min(batch_size, 200) # somewhat arbitrary...
             batch_size = max(batch_size, 20000)
             log.debug('Adjusting batch_size to %d and yielding', batch_size)
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
             log.debug('re-acquired lock')
             stamp = time.time()
 
@@ -514,7 +514,7 @@ class Operations(pyfuse3.Operations):
                         queue.append((src_id, target_id, name_id))
                         break
 
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         # Make replication visible
         self.db.execute('UPDATE contents SET parent_inode=? WHERE parent_inode=?',
@@ -932,7 +932,7 @@ class Operations(pyfuse3.Operations):
             and (self.failsafe or self.inodes[id_].locked)):
             raise FUSEError(errno.EPERM)
 
-        return id_
+        return pyfuse3.FileInfo(fh=id_, keep_cache=True)
 
     async def access(self, id_, mode, ctx):
         '''Check if requesting process has `mode` rights on `inode`.
@@ -962,7 +962,7 @@ class Operations(pyfuse3.Operations):
             inode = self.inodes[id_]
 
         self.open_inodes[inode.id] += 1
-        return (inode.id, inode.entry_attributes())
+        return (pyfuse3.FileInfo(fh=inode.id), inode.entry_attributes())
 
     def _create(self, id_p, name, mode, ctx, rdev=0, size=0):
         if name == CTRL_NAME:
@@ -1122,7 +1122,7 @@ class Operations(pyfuse3.Operations):
             self.inodes.flush_id(fh)
 
         for blockno in range(0, self.inodes[fh].size // self.max_obj_size + 1):
-            await self.cache.flush_local(fh, blockno)
+            self.cache.flush_local(fh, blockno)
 
     async def forget(self, forget_list):
         log.debug('started with %s', forget_list)

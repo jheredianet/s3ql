@@ -126,6 +126,7 @@ def main():
             compile_args.append('-Werror')
 
         # Value-changing conversions should always be explicit.
+        #comment if errors
         compile_args.append('-Werror=conversion')
 
         # Note that (i > -1) is false if i is unsigned (-1 will be converted to
@@ -143,10 +144,10 @@ def main():
                      'google-auth',
                      'google-auth-oauthlib',
 
-                     # earlier trio versions swallow exceptions raised by
-                     # pyfuse3.main().
-                     'trio >= 0.9',
-                     'pyfuse3 >= 1.0, < 2.0' ]
+                     # Need trio.lowlevel
+                     'trio >= 0.15',
+                     'pyfuse3 >= 3.0, < 4.0',
+                     'google-api-python-client >= 1.4.2']
     if sys.version_info < (3, 7, 0):
         required_pkgs.append('async_generator')
 

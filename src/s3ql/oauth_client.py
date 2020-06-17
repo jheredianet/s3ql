@@ -8,12 +8,12 @@ This work can be distributed under the terms of the GNU GPLv3.
 
 from .logging import logging, setup_logging, QuietError
 from .parse_args import ArgumentParser
-
 from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.client import AccessTokenCredentials
 from  oauth2client.client import OOB_CALLBACK_URN
 from .common import OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
 from google_auth_oauthlib.flow import InstalledAppFlow
+
 import sys
 import textwrap
 import requests
@@ -83,9 +83,10 @@ def googleDrive(options):
     print("user: %s" % options.client_id)
     print("password: %s:%s" % (options.client_secret,credentials.refresh_token))
 
+
+
+
 def googleStorage(options):
-    # We need full control in order to be able to update metadata
-    # cf. https://stackoverflow.com/questions/24718787
     flow = InstalledAppFlow.from_client_config(
         client_config={
               "installed": {
@@ -115,4 +116,4 @@ def main(args=None):
     elif options.oauth_type == 'google-drive':
         googleDrive(options)
     else:
-        raise QuietError('Invalid oauth type : ' + options.oauth_type)    
+        raise QuietError('Invalid oauth type : ' + options.oauth_type)

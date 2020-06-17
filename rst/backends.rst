@@ -200,7 +200,7 @@ for Keystone (v2 and v3) authentication, the storage URL is ::
 
 Note that when using Keystone authentication, you can (and have to)
 specify the storage region of the container as well. Also note that when
-using Keystone v3 authentication, the `domain` option is required.
+using Keystone v3 authentication, the :var:`domain` option is required.
 
 In both cases, *hostname* name should be the name of the
 authentication server.  The storage container must already exist (most
@@ -213,9 +213,12 @@ When using legacy authentication, the backend login and password
 correspond to the OpenStack username and API Access Key. When using
 Keystone authentication, the backend password is your regular
 OpenStack password and the backend login combines you OpenStack
-username and tenant name in the form `<tenant>:<user>`. If no tenant
-is required, the OpenStack username alone may be used as backend
-login.
+username and tenant/project in the form :var:`<tenant>:<user>`.
+If no tenant is required, the OpenStack username alone may be used as
+backend login. For Keystone v2 :var:`<tenant>` needs to be the
+tenant name (:envvar:`!OS_TENANT_NAME` in the OpenStack RC File).
+For Keystone v3 :var:`<tenant>` needs to be the project ID
+(:envvar:`!OS_TENANT_ID` in the OpenStack RC File).
 
 The OpenStack backend accepts the following backend options:
 
@@ -259,17 +262,21 @@ The OpenStack backend accepts the following backend options:
 .. option:: domain
 
    If this option is specified, S3QL will use the Keystone v3 API. The
-   default domain for OpenStack installations is `Default`. If this
-   option is specified without setting the `project-domain` option, this
-   will be used for both the project and the user domain. Note: some
-   instances of the Keystone v3 API prefer the use of UUIDs rather than
-   names for tenant (called project in newer OpenStack versions), as
-   well as domains.
+   default domain ID for OpenStack installations is :var:`default`. If this
+   option is specified without setting the :var:`project-domain` option, this
+   will be used for both the project and the user domain.
+   You need to provide the domain ID not the domain name to this option.
+   If your provider did not give you a domain ID, then it is most likely
+   :var:`default`.
 
 .. option:: project-domain
+
    In simple cases, the project domain will be the same as the auth
-   domain. If the `project-domain` option is not specified, it will be
+   domain. If the :var:`project-domain` option is not specified, it will be
    assumed to be the same as the user domain.
+   You need to provide the domain ID not the domain name to this option.
+   If your provider did not give you a domain ID, then it is most likely
+   :var:`default`.
 
 .. __: http://tools.ietf.org/html/rfc2616#section-8.2.3
 .. _OpenStack: http://www.openstack.org/
@@ -372,6 +379,70 @@ The S3 compatible backend accepts the following backend options:
 
 .. _`S3 COPY API`: http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectCOPY.html
 .. __: https://doc.s3.amazonaws.com/proposals/copy.html
+
+
+Backblaze B2
+============
+
+Backblaze B2 is a cloud storage with its own API.
+
+The storage URL for backblaze b2 storage is ::
+
+   b2://<bucket-name>[/<prefix>]
+
+*bucket-name* is an (existing) bucket which has to be accessible with
+the provided account key. The *prefix* will be appended to all names
+used by S3QL and can be used to hold separate S3QL repositories in the
+same bucket.
+
+It is also possible to use an application key. The required key capabilities
+are the following:
+
+   - `listBuckets`
+   - `listFiles`
+   - `readFiles`
+   - `writeFiles`
+   - `deleteFiles`
+
+.. option:: disable-versions
+
+   If versioning of the bucket is not enabled, this option can be set.
+   When deleting objects, the bucket will not be scanned for all file versions
+   because it will be implied that only the one (the most recent) version of a
+   file exists. This will use only one class B transaction instead of
+   (possibly) multiple class C transactions.
+
+.. option:: retry-on-cap-exceeded
+
+   If there are data/transaction caps set for the backblaze account, this option
+   controls if operations should be retried as cap counters are reset every day.
+   Otherwise the exception would abort the program.
+
+.. option:: test-mode-fail-some-uploads
+
+   This option puts the backblaze B2 server into test mode by adding a special header
+   to the upload requests. The server will then randomly fail some uploads. Use
+   only to test the failure resiliency of the backend implementation as it causes
+   unnecessary traffic, delays and transactions.
+
+.. option:: test-mode-expire-some-tokens
+
+   Similarly to the option above this lets the server fail some authorization tokens
+   in order to test the reauthorization of the backend implementation.
+
+.. option:: test-mode-force-cap-exceeded
+
+   Like above this option instructs the server to behave as if the data/transaction
+   caps were exceeded. Use this only to test the backend implementation for correct/desired
+   behavior. Can be useful in conjunction with *retry-on-cap-exceeded* option.
+
+.. option:: tcp-timeout
+
+   Specifies the timeout used for TCP connections. If no data can be
+   exchanged with the remote server for longer than this period, the
+   TCP connection is closed and re-established (default: 20 seconds).
+
+.. _Backblaze B2 API: https://www.backblaze.com/b2/docs/
 
 
 Local
