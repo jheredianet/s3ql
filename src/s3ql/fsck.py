@@ -89,7 +89,8 @@ class Fsck(object):
 
             self.check_objects_temp()
             self.check_objects_refcount()
-            self.check_objects_id()
+            # To skip cloud objects
+            # self.check_objects_id()
             self.check_objects_size()
 
             self.check_blocks_obj_id()
